@@ -1,0 +1,266 @@
+<?php
+
+function my_module_menu() {
+  $items = array();
+  $items['my_module/form'] = array(
+    'title' => t('Test Beacon pathway upload'),
+    'page callback' => 'my_module_form',
+    'access arguments' => array('access content'),
+    'description' => t('Test Beacon pathway upload'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+
+
+function my_module_form() {
+  return drupal_get_form('my_module_my_form');
+}
+
+function my_module_my_form($form_state) {
+   
+  // We establish a fieldset element and then place two text fields within
+  // it, one for a first name and one for a last name. This helps us group
+  //related content.
+  //
+  // Study the code below and you'll notice that we renamed the array of the first
+  // and last name fields by placing them under the $form['name']
+  // array. This tells
+  // Form API these fields belong to the $form['name'] fieldset.
+  $form['#attributes'] = array('enctype' => "multipart/form-data");
+
+
+  $form['title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Title'),
+    '#required' => TRUE,
+    '#size' => 30,
+  );
+    
+  $form['keywords'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Key words'),
+    '#description' => 'Separate key words with comma',
+    '#size' => 60,
+  );
+
+  $form['description'] = array(
+    '#type' => 'textarea',
+    '#title' => 'Description',
+  );
+
+  $form['beacon_file'] = array(
+    '#type' => 'file',
+    '#title' => t('Beacon Project to Upload:'),
+   );
+
+  $form['recource'] = array(
+    '#type' => 'file',
+    '#title' => t('Additional resurces'),
+   );
+    
+  $form['organism'] = array(
+    '#type' => 'select',
+    '#title' => 'Organism',
+    '#options' => array(
+     '1' => 'All Organism',
+     '2' => 'Arabidopsis thaliana',
+     '3' => 'Zea mays',
+    ),
+  );
+  $form['update'] = array(
+     '#type' => 'select',
+     '#title' => 'Is this an update of existing pathway',
+     '#options' => array(
+         '1' => 'No',
+         '2' => 'Yes',
+  ),
+                     
+  );
+    
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'Submit',
+  );
+  $form['clear'] = array(
+    '#type' => 'submit',
+    '#value' => 'Clear',
+    '#validate' => array('my_module_my_form_clear'),
+  );
+
+
+  return $form;
+}
+
+function my_module_my_form_clear($form, &$form_state){
+   $form_state['rebuild'] = TRUE;
+}
+
+function my_module_my_form_validate($form, &$form_state) {
+}
+
+// store the pathway and related information to database
+function store_pathway($xml, $addinfo){
+	#get the current maxid of pathway
+	$sql = 'select max(idpathway) as mid from beacon_test.pathway';
+	$result = db_query($sql);
+	$row = db_fetch_object($result);
+	$pathid = $row->mid + 1;
+	
+	# insert into pathway table
+
+	$format = 'insert into {beacon_new.pathway} (id_pathway, name,description,created_on,modified_on,id_organism,id_version, original_pathway, parent_pathway, latest_version) values ("%s", "%s", "%s", "%s", "%s", "%s", "%d", %s, %s, %s)';
+	$sql = sprintf($format, $pathid, $addinfo['name'], $addinfo['description'], $addinfo['created_on'], $addinfo['modified_on'], $addinfo['id_organism'],
+	$addinfo['original_pathway'], $addinfo['id_version'], $addinfo['parent_pathway'], $addinfo['latest_version']);
+	db_query($sql);
+	
+	# construct node array and edge array
+	$nodes = array();
+	
+	#get nodeid
+	$sql = 'select max(idnode) as mid from beacon_test.node';
+	$result = db_query($sql);
+	$row = db_fetch_object($result);
+	$mrid = $row->mid;
+	#get edgeid
+	$sql = 'select max(idedge) as mid from beacon_test.edge';
+	$result = db_query($sql);
+	$row = db_fetch_object($result);
+	$meid = $row->mid;
+	
+	#get node type
+	foreach($xml->children() as $entity)
+	{
+		 #firep($entity['id']);
+		 $id = (string)$entity['id'];
+		 $type = substr($id, 0, 4);
+		 if($type == "node")
+		 {
+		 	$attrs = array();
+			$attrs['label'] = (string)$entity->label['text'];
+			$attrs['title'] = (string)$entity->label['text'];
+			$attrs['idnode'] = ++$mrid;
+			$attrs['node_type'] = 1; #need to change in future
+			$attrs['idpathway'] = $pathid;
+			$nodes[$id] = $attrs;
+		 }		
+	}
+ 
+  #get edge info
+  $edge_types = array();
+	$sql = 'select idedge_type, name from beacon_test.edge_type';
+	$rs = db_query($sql);
+	while($row = db_fetch_object($rs))
+	{
+		$edge_types[strtolower($row->name)] = $row->idedge_type;
+	}
+	
+  $edges = array();
+	foreach($xml->children() as $entity)
+	{
+		 #firep($entity['id']);
+		 $id = (string)$entity['id'];
+		 $type = substr($id, 0, 4);
+		 if($type == "edge")
+		 {
+		 	$attrs = array();
+			$source = (string)$entity->ports['source'];
+			$target = (string)$entity->ports['target'];
+			$attrs['sid'] = $nodes[$source]['idnode'];
+			$attrs['tid'] = $nodes[$target]['idnode'];
+			
+			$attrs['edge_id'] = ++$meid;
+			$class = (string)$entity['class'];
+			$new_class = $class;
+			switch($class){
+				case 'unknown_influence' : 
+					$new_class = 'unknown influence';
+					break;
+				case 'logic_arc':
+					$new_class = 'logical arc';
+					break;
+				case 'positive_influence':
+					$new_class = 'positive influence';
+					break;
+				case 'negative_influence':
+					$new_class = 'negative influence';
+					break;
+				case 'necessary_stimulation':
+					$new_class = 'necessary stimulation';
+					break;
+				case 'equivalence_arc':
+					$new_class = 'equivalence arc';
+					break;
+				default:
+					$new_class = $class;
+			}
+			$attrs['idedge_type'] = $edge_types[$new_class];
+			$edges[$id] = $attrs;
+		 }		
+	}
+	
+	# insert into nodes table
+	$format = 'insert into beacon_new.node (id_node, name, node_type, node_subtype, description, unit_name, unit_type, id_pathway) values (%s, "%s", %s, %s, %s, %s, %s, %s)' ;
+	foreach($nodes as $node)
+	{
+		$sql = sprintf($format, $node['id_node'], $node['name'], $node['node_type'], $node['node_subtype'], $node['description'], $node['unit_name'], $node['unit_type'], $node['id_pathway']);
+		db_query($sql);
+	}
+	
+	# insert into edge table
+	$format = 'insert into beacon_test.edge (id_edge, id_parent_node, id_child_node, id_pathway, edge_type) values (%s, %s, %s, %s, %s)';
+	foreach($edges as $edge)
+	{
+		$sql = sprintf($format, $edge['id_edge'], $edge['id_parent_node'], $edge['id_child_node'], $edge['id_pathway'], $edge['edge_type']);
+		db_query($sql);
+	}
+	  
+}
+
+// Adds a submit handler/function to our form to send a successful
+// completion message to the screen.
+
+function my_module_my_form_submit($form, &$form_state) {
+	  global $user;
+		date_default_timezone_set('UTC');
+	  $form_state['redirect'] = FALSE;
+    $file = file_save_upload('beacon_file', array(), file_directory_path(), $replace=FILE_EXISTS_REPLACE);
+    $filepath = $form_state['values']['beacon_file']->filepath;
+    drupal_set_message(t('The form has been submitted. filename: @filename, @filepath', array('@filename' => $file->filename,
+    '@filepath'=> $file->filepath,)));
+		
+		$title = $form_state['values']['title'];
+		$description = $form_state['values']['description'];
+		$organism = $form_state['values']['organism'];
+		$uploader = $user->uid;
+		$created_on = date('Y-m-d H:i:s');
+		$modified_on = date('Y-m-d H:i:s');
+		$version = 1;
+		
+		$addinfo = array('title'=> $title, 
+		'description' => $description,
+		'idorganism' => $organism,
+		'uploaded_by' => $uploader,
+		'created_on' => $created_on,
+		'modified_on' => $modified_on,
+		'version' => $version);
+		
+		#firep($addinfo, $optional_tile);
+		
+		$item = 'This is good';
+		$optional_tile = 'Not a title';
+		
+    $xml = simplexml_load_file($file->filepath);
+		
+		store_pathway($xml, $addinfo);
+		#firep($xml, $optional_tile);
+		
+		$query = "select * from beacon_test.pathway";
+		$result = db_query($query);
+		#firep($result, $optional_tile);
+	  #while($row = db_fetch_object($result))
+		#{
+		#	firep($row, $optional_tile);
+		#}
+}

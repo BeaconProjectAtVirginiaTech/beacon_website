@@ -1,0 +1,5 @@
+
+name = Annotate
+description = annotates the nodes.
+core = 6.x
+package = Pro Drupal Development
