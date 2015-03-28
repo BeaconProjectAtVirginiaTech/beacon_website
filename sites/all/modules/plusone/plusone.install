@@ -1,0 +1,53 @@
+<?php
+
+/**
+ * Implementation the hook_install
+ */
+function plusone_install(){
+    // create tables
+    drupal_install_schema('plusone');
+}
+
+/**
+ * Implementation the hook_uninstall
+ */
+ function plusone_uninstall(){
+ 	// drop tables
+ 		drupal_uninstall_schema('plusone');
+ }
+ 
+ /*
+  * Implementation the hook_schema
+  */
+  function plusone_schema(){
+  	$schema['plusone_votes'] = array(
+		'description' => t('Store the votes from plusone module'),
+		'fields' => array(
+			'uid' => array(
+				'type' => 'int',
+				'not null' => TRUE,
+				'default' => 0,
+				'description' => t('The {user}.id of the user casting the vote!'),
+			),
+			'nid' => array(
+				'type' => 'int',
+				'not null' => TRUE,
+				'default' => 0,
+				'description' => t('The {node}.nid of the node being voted!'),
+			),
+			'vote_count' => array(
+				'type' => 'int',
+				'not null' => TRUE,
+				'default' => 0,
+				'description' => t('The number of votes casted!')
+			),
+		),
+		'primary key' => array('uid', 'nid'),
+		'indexes' => array(
+			'uid' => array('uid'),
+			'nid' => array('nid'),
+		),
+	);
+	return $schema;
+ }
+	

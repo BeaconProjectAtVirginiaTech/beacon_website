@@ -1,0 +1,148 @@
+<?php
+ /*
+  * Implementation hook_menu
+  */
+  function plusone_menu(){
+  	$items['plusone/vote'] = array(
+		'page callback' => 'plusone_vote',
+		'access arguments' => array('access content'),
+		'type' => MENU_CALLBACK,
+		);
+		return $items;
+  }
+	
+	function plusone_vote($nid){
+		global $user;
+		$nid = (int)$nid;
+		
+		// Author can't vote for their own post
+		$is_author = db_result(db_query('select uid from {node} where nid=%d and uid=%d', $nid, $user->uid));
+		
+		if($nid > 0 && !$is_author)
+		{
+			// get vote count
+			$vote_count = plusone_get_vote($nid, $user->uid);
+			if(!$vote_count)
+			{
+				db_query('delete from {plusone_votes} where uid=%d and nid=%d', $user->uid, $nid);
+				#insert intot the database
+				$query = 'insert into {plusone_votes} (uid, nid, vote_count) values (%d, %d, %d)';
+				db_query($query, $user->uid, $nid, 1);
+			}
+		}
+		
+		// get new total to display
+		$total_votes = plusone_get_total($nid);
+		
+		// Check if Jquery made the call
+		// The POST method and passed in key/pair with js=1
+		if(!empty($_POST['js']))
+		{
+			//Jquery made the call
+			drupal_json(array(
+			'total_votes' => $total_votes,
+			'voted' => t('You Voted!'),
+			));
+			exit();
+		}
+		
+		// It was a non-jquery call
+		$path = drupal_get_path_alias('node/'.$nid);
+		drupal_goto($path);
+	}
+
+	/**
+	 * return the votes given nid/uid pair
+	 */
+	function plusone_get_vote($nid, $uid){
+		return (int)db_result(db_query('select vote_count from {plusone_votes} where uid=%d and nid=%d', $uid, $nid));
+	}
+	
+	/**
+	 * return the total votes of nid
+	 */
+	function plusone_get_total($nid)
+	{
+		return (int)db_result(db_query('select sum(vote_count) from {plusone_votes} where nid=%d', $nid));
+	}
+
+	/**
+	 * Create the widge for vote along with post
+	 */
+	function plusone_widget($nid){
+		global $user;		
+		$total = plusone_get_total($nid);
+		$is_author = db_result(db_query('select uid from {node} where nid=%d and uid=%d', $nid, $user->uid));
+		$voted = plusone_get_vote($nid, $user->uid);
+		return theme('plusone_widget', $nid, $total, $is_author, $voted);
+	}	
+	
+	/**
+	 * Implementation of hook_theme,
+	 * Let Drupal know our theme function
+	 */
+	function plusone_theme(){
+		return array(
+		'plusone_widget' => array(
+			'arguments' => array('nid', 'total', 'is_author', 'voted'),
+		)
+		);
+	}	
+	
+	/**
+	 * Theme for the voting widget
+	 */
+
+	 function theme_plusone_widget($nid, $total, $is_author, $voted){
+	 	// Load the js and css script
+	 	drupal_add_js(drupal_get_path('module', 'plusone').'/plusone.js');
+		drupal_add_css(drupal_get_path('module', 'plusone').'/plusone.css');
+		
+		$output = '<div class="plusone-widget">';
+		$output .= '<div class="score">'.$total.'</div>';
+		$output .= '<div class="vote">';
+		
+		if($is_author)
+		{
+			// Author is not allowed to vote
+			$output .= t('Votes');
+		}
+		elseif($voted)
+		{
+			//One user can't voted more than once
+			$output .= t('You Voted');
+		}
+		else {
+			$output .= l(t('Vote'), 'plusone/vote/'.$nid, array(
+			'attributes' => array('class' => 'plusone-link'),
+			));
+		}
+		
+		$output .= '</div>';
+		$output .= '</div>';
+		return $output;
+	 }	
+	 
+	 /**
+	  * implementation hook_nodeapi()
+	  */
+	function plusone_nodeapi(&$node, $op, $teaser, $page){
+		firep($op, 'good');
+		switch($op){
+			case 'view':
+				// Show the widget if only the full node is displayed
+				if(!$teaser){
+					$node->content['plusone_widget'] = array(
+					'#value' => plusone_widget($node->nid),
+					'#weight' => 100,
+					);
+				}
+				firep($teaser, '---');
+				break;
+			case 'delete':
+				// Delete all voted data
+				db_query('delete from {plusone_votes} where nid=%d', $node->nid);
+				break;
+		}
+		
+	} 
